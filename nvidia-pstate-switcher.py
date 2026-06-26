@@ -291,11 +291,15 @@ class PStateSwitcher(QtWidgets.QSystemTrayIcon):
 
     def _on_ipc_connection(self):
         conn = self._ipc_server.nextPendingConnection()
-        if conn:
-            conn.readyRead.connect(self._on_ipc_data)
+        if not conn:
+            return
+        conn.readyRead.connect(self._on_ipc_data)
+        if conn.bytesAvailable() > 0:
+            self._on_ipc_data(conn)
 
-    def _on_ipc_data(self):
-        conn = self.sender()
+    def _on_ipc_data(self, conn=None):
+        if conn is None:
+            conn = self.sender()
         data = conn.readAll().data()
         if data == b"show_menu":
             menu = self.contextMenu()

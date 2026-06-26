@@ -8,6 +8,7 @@ Uses async QProcess to avoid blocking the UI thread.
 import argparse
 import json
 import os
+import shutil
 import subprocess
 import sys
 
@@ -155,6 +156,9 @@ class PStateSwitcher(QtWidgets.QSystemTrayIcon):
 
         self._cfg = _load_config()
 
+        self._nvidia_pstate_bin = shutil.which("nvidia-pstate") or "nvidia-pstate"
+        self._nvidia_smi_bin = shutil.which("nvidia-smi") or "nvidia-smi"
+
         custom = self._cfg.get("pstates")
         if custom:
             self._pstates = {p: DEFAULT_PSTATES.get(p, "") for p in custom}
@@ -252,12 +256,12 @@ class PStateSwitcher(QtWidgets.QSystemTrayIcon):
     # ── async refresh ─────────────────────────────────────
 
     def _run_pstate_setter(self, ps_id: str) -> None:
-        self._setter.run(["nvidia-pstate", "-ps", ps_id])
+        self._setter.run([self._nvidia_pstate_bin, "-ps", ps_id])
 
     def _refresh(self):
         self._runner.run(
             [
-                "nvidia-smi", "--query-gpu=index,power.draw,pstate",
+                self._nvidia_smi_bin, "--query-gpu=index,power.draw,pstate",
                 "--format=csv,noheader,nounits",
             ]
         )
@@ -301,7 +305,8 @@ def main():
     args = parser.parse_args()
 
     if args.oneshot:
-        subprocess.check_call(["nvidia-pstate", "-ps", args.oneshot])
+        nvidia_pstate_bin = shutil.which("nvidia-pstate") or "nvidia-pstate"
+        subprocess.check_call([nvidia_pstate_bin, "-ps", args.oneshot])
         return
 
     app = QtWidgets.QApplication(sys.argv)

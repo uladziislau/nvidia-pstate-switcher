@@ -77,14 +77,30 @@ nvidia-pstate-switcher --oneshot 16
 
 ## P-States
 
-| P-State | Label           | Typical Power |
-|---------|-----------------|---------------|
-| P0      | Max performance | ~45–65 W      |
-| P2      | Balanced        | ~40 W         |
-| P3      | Medium          | ~37 W         |
-| P5      | Idle            | ~21–27 W      |
-| P8      | Deep idle       | ~21 W         |
-| Auto    | Driver control  | dynamic       |
+| P-State | Label           | Description                  |
+|---------|-----------------|------------------------------|
+| P0      | Max perf        | Maximum performance          |
+| P2      | Balanced        | Balanced performance/power   |
+| P3      | Medium          | Medium power saving          |
+| P5      | Idle            | Idle / low power             |
+| P8      | Deep idle       | Deep idle (maximum saving)   |
+| Auto    | Driver control  | Dynamic (NVIDIA driver decides) |
+
+> Power draw varies by GPU model. Check your actual power via the tooltip (hover the tray icon) or `nvidia-smi`.
+
+### Custom P-state list
+
+Your GPU may support a different set of P-states. You can override the menu items by adding a `pstates` list to the config file:
+
+```json
+{
+  "pstate": "16",
+  "autostart": true,
+  "pstates": ["0", "2", "3", "5", "8", "12", "15"]
+}
+```
+
+Edit `~/.config/nvidia-pstate-switcher.conf` and restart the app.
 
 ## How it works
 
@@ -193,14 +209,30 @@ nvidia-pstate-switcher --oneshot 16
 
 ## P-Состояния
 
-| P-State | Описание           | Типичная мощность |
-|---------|--------------------|-------------------|
-| P0      | Максимальная произв.| ~45–65 Вт         |
-| P2      | Сбалансированный   | ~40 Вт            |
-| P3      | Средний            | ~37 Вт            |
-| P5      | Простой            | ~21–27 Вт         |
-| P8      | Глубокий простой   | ~21 Вт            |
-| Auto    | Управление драйвером| динамически       |
+| P-State | Описание           | Пояснение                     |
+|---------|--------------------|-------------------------------|
+| P0      | Max perf           | Максимальная производительность|
+| P2      | Balanced           | Сбалансированный режим        |
+| P3      | Medium             | Среднее энергосбережение      |
+| P5      | Idle               | Простой / низкое потребление  |
+| P8      | Deep idle          | Глубокий простой              |
+| Auto    | Driver control     | Динамически (решает драйвер)  |
+
+> Потребление зависит от модели GPU. Актуальная мощность отображается в подсказке при наведении на иконку в трее или в `nvidia-smi`.
+
+### Пользовательский список P-state
+
+Ваша видеокарта может поддерживать другой набор P-состояний. Список в меню можно переопределить в конфиге:
+
+```json
+{
+  "pstate": "16",
+  "autostart": true,
+  "pstates": ["0", "2", "3", "5", "8", "12", "15"]
+}
+```
+
+Отредактируйте `~/.config/nvidia-pstate-switcher.conf` и перезапустите приложение.
 
 ## Как это работает
 

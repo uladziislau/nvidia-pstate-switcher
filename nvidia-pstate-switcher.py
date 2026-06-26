@@ -13,13 +13,13 @@ import sys
 
 from PyQt6 import QtCore, QtGui, QtWidgets
 
-P_STATES = [
-    ("0", "P0 — Max perf", "~45–65 W"),
-    ("2", "P2", "~40 W"),
-    ("3", "P3", "~37 W"),
-    ("5", "P5 — Idle", "~21–27 W"),
-    ("8", "P8 — Deep idle", "~21 W"),
-]
+DEFAULT_PSTATES = {
+    "0": "Max perf",
+    "2": "Balanced",
+    "3": "Medium",
+    "5": "Idle",
+    "8": "Deep idle",
+}
 
 CONFIG_DIR = os.path.expanduser("~/.config")
 CONFIG_FILE = os.path.join(CONFIG_DIR, "nvidia-pstate-switcher.conf")
@@ -155,6 +155,12 @@ class PStateSwitcher(QtWidgets.QSystemTrayIcon):
 
         self._cfg = _load_config()
 
+        custom = self._cfg.get("pstates")
+        if custom:
+            self._pstates = {p: DEFAULT_PSTATES.get(p, "") for p in custom}
+        else:
+            self._pstates = dict(DEFAULT_PSTATES)
+
         self._runner = CommandRunner()
         self._runner.finished.connect(self._on_smi_ok)
         self._runner.failed.connect(self._on_smi_fail)
@@ -196,8 +202,9 @@ class PStateSwitcher(QtWidgets.QSystemTrayIcon):
         self._menu = QtWidgets.QMenu()
         self._ps_actions = []
 
-        for ps_id, label, power in P_STATES:
-            action = self._menu.addAction(f"{label}  {power}")
+        for ps_id, label in self._pstates.items():
+            text = f"P{ps_id} — {label}" if label else f"P{ps_id}"
+            action = self._menu.addAction(text)
             action.setData(ps_id)
             action.setCheckable(True)
             self._ps_actions.append(action)

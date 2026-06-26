@@ -9,6 +9,7 @@ import argparse
 import json
 import os
 import shutil
+import socket
 import subprocess
 import sys
 
@@ -27,8 +28,7 @@ CONFIG_FILE = os.path.join(CONFIG_DIR, "nvidia-pstate-switcher.conf")
 AUTOSTART_FILE = os.path.expanduser(
     "~/.config/autostart/nvidia-pstate-switcher.desktop"
 )
-
-DESKTOP_ENTRY = (
+AUTOSTART_ENTRY = (
     "[Desktop Entry]\n"
     "Type=Application\n"
     "Name=NVIDIA P-State Switcher\n"
@@ -40,8 +40,36 @@ DESKTOP_ENTRY = (
     "StartupNotify=false\n"
     "X-KDE-autostart-condition=true\n"
 )
+APP_DESKTOP_PATH = os.path.expanduser(
+    "~/.local/share/applications/nvidia-pstate-switcher.desktop"
+)
+APP_DESKTOP_ENTRY = (
+    "[Desktop Entry]\n"
+    "Type=Application\n"
+    "Name=NVIDIA P-State Switcher\n"
+    "Comment=Manually control NVIDIA GPU performance state from system tray\n"
+    "Exec=/usr/local/bin/nvidia-pstate-switcher\n"
+    "Icon=nvidia-pstate-switcher\n"
+    "Categories=System;Hardware;\n"
+    "Terminal=false\n"
+    "StartupNotify=false\n"
+)
+# QLocalServer("nvidia-pstate-switcher") creates /tmp/nvidia-pstate-switcher on Linux
+IPC_SERVER = "nvidia-pstate-switcher"
+IPC_SOCKET = os.path.join("/tmp", IPC_SERVER)
 
-# ── config helpers ────────────────────────────────────────
+
+# ── helpers ────────────────────────────────────────────────
+
+def _resolve_bin(name: str) -> str:
+    found = shutil.which(name)
+    if found:
+        return found
+    local = os.path.expanduser(f"~/.local/bin/{name}")
+    if os.path.isfile(local) and os.access(local, os.X_OK):
+        return local
+    return name
+
 
 def _load_config() -> dict:
     try:
@@ -65,12 +93,20 @@ def _set_autostart(enabled: bool) -> None:
     if enabled:
         os.makedirs(os.path.dirname(AUTOSTART_FILE), exist_ok=True)
         with open(AUTOSTART_FILE, "w") as f:
-            f.write(DESKTOP_ENTRY)
+            f.write(AUTOSTART_ENTRY)
     else:
         try:
             os.remove(AUTOSTART_FILE)
         except FileNotFoundError:
             pass
+
+
+def _ensure_desktop_entry():
+    if os.path.isfile(APP_DESKTOP_PATH):
+        return
+    os.makedirs(os.path.dirname(APP_DESKTOP_PATH), exist_ok=True)
+    with open(APP_DESKTOP_PATH, "w") as f:
+        f.write(APP_DESKTOP_ENTRY)
 
 
 # ── icon cache ────────────────────────────────────────────
@@ -79,7 +115,6 @@ _icon_cache: dict[str, QtGui.QIcon] = {}
 
 
 def _render_icon(label: str, size: int = 48) -> QtGui.QIcon:
-    """Render P-state text with white outline on transparent background."""
     if label in _icon_cache:
         return _icon_cache[label]
 
@@ -119,8 +154,8 @@ def _render_icon(label: str, size: int = 48) -> QtGui.QIcon:
 class CommandRunner(QtCore.QObject):
     """Run shell commands without blocking the UI thread."""
 
-    finished = QtCore.pyqtSignal(str)  # stdout
-    failed = QtCore.pyqtSignal(str)    # error message
+    finished = QtCore.pyqtSignal(str)
+    failed = QtCore.pyqtSignal(str)
 
     def run(self, cmd: list[str]):
         self._proc = QtCore.QProcess(self)
@@ -134,12 +169,11 @@ class CommandRunner(QtCore.QObject):
         self._proc.start()
 
     def _on_done(self, exit_code: int):
+        out = self._proc.readAllStandardOutput().data().decode().strip()
         if exit_code == 0:
-            out = self._proc.readAllStandardOutput().data().decode().strip()
             self.finished.emit(out)
         else:
-            err = self._proc.readAllStandardOutput().data().decode().strip()
-            self.failed.emit(err or f"exit code {exit_code}")
+            self.failed.emit(out or f"exit code {exit_code}")
 
     def _on_error(self, err):
         self.failed.emit(f"cannot launch: {self._proc.program()} ({err.name})")
@@ -149,54 +183,23 @@ class CommandRunner(QtCore.QObject):
 
 class PStateSwitcher(QtWidgets.QSystemTrayIcon):
 
-    _current_label = "—"
-
-    @staticmethod
-    def _resolve_bin(name: str) -> str:
-        found = shutil.which(name)
-        if found:
-            return found
-        local = os.path.expanduser(f"~/.local/bin/{name}")
-        if os.path.isfile(local) and os.access(local, os.X_OK):
-            return local
-        return name
-
-    @staticmethod
-    def _ensure_desktop_entry():
-        path = os.path.expanduser(
-            "~/.local/share/applications/nvidia-pstate-switcher.desktop"
-        )
-        if os.path.isfile(path):
-            return
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        entry = (
-            "[Desktop Entry]\n"
-            "Type=Application\n"
-            "Name=NVIDIA P-State Switcher\n"
-            "Comment=Manually control NVIDIA GPU performance state from system tray\n"
-            "Exec=/usr/local/bin/nvidia-pstate-switcher\n"
-            "Icon=nvidia-pstate-switcher\n"
-            "Categories=System;Hardware;\n"
-            "Terminal=false\n"
-            "StartupNotify=false\n"
-        )
-        with open(path, "w") as f:
-            f.write(entry)
+    _current_label = "\u2014"
 
     def __init__(self, parent=None):
         super().__init__(parent)
 
         self._cfg = _load_config()
 
-        self._nvidia_pstate_bin = self._resolve_bin("nvidia-pstate")
-        self._nvidia_smi_bin = self._resolve_bin("nvidia-smi")
-        self._ensure_desktop_entry()
+        self._nvidia_pstate_bin = _resolve_bin("nvidia-pstate")
+        self._nvidia_smi_bin = _resolve_bin("nvidia-smi")
+        _ensure_desktop_entry()
 
         custom = self._cfg.get("pstates")
-        if custom:
-            self._pstates = {p: DEFAULT_PSTATES.get(p, "") for p in custom}
-        else:
-            self._pstates = dict(DEFAULT_PSTATES)
+        self._pstates = (
+            {p: DEFAULT_PSTATES.get(p, "") for p in custom}
+            if custom
+            else dict(DEFAULT_PSTATES)
+        )
 
         self._runner = CommandRunner()
         self._runner.finished.connect(self._on_smi_ok)
@@ -206,7 +209,7 @@ class PStateSwitcher(QtWidgets.QSystemTrayIcon):
         self._setter.finished.connect(lambda _: self._refresh())
         self._setter.failed.connect(self._on_setter_fail)
 
-        self.setIcon(_render_icon("—"))
+        self.setIcon(_render_icon("\u2014"))
 
         self.monitor_timer = QtCore.QTimer(self)
         self.monitor_timer.timeout.connect(self._refresh)
@@ -225,9 +228,9 @@ class PStateSwitcher(QtWidgets.QSystemTrayIcon):
         self._ipc_server.setSocketOptions(
             QtNetwork.QLocalServer.SocketOption.WorldAccessOption
         )
-        QtNetwork.QLocalServer.removeServer("nvidia-pstate-switcher")
-        if not self._ipc_server.listen("nvidia-pstate-switcher"):
-            print("IPC server failed to listen", flush=True)
+        QtNetwork.QLocalServer.removeServer(IPC_SERVER)
+        if not self._ipc_server.listen(IPC_SERVER):
+            print("IPC server failed to listen", file=sys.stderr)
         self._ipc_server.newConnection.connect(self._on_ipc_connection)
 
         self.setToolTip("NVIDIA P-State\n(right-click for menu)")
@@ -249,7 +252,7 @@ class PStateSwitcher(QtWidgets.QSystemTrayIcon):
         self._ps_actions = []
 
         for ps_id, label in self._pstates.items():
-            text = f"P{ps_id} — {label}" if label else f"P{ps_id}"
+            text = f"P{ps_id} \u2014 {label}" if label else f"P{ps_id}"
             action = self._menu.addAction(text)
             action.setData(ps_id)
             action.setCheckable(True)
@@ -293,23 +296,16 @@ class PStateSwitcher(QtWidgets.QSystemTrayIcon):
 
     def _on_ipc_connection(self):
         conn = self._ipc_server.nextPendingConnection()
-        if not conn:
-            return
-        data = conn.readAll().data()
-        if data == b"show_menu":
+        if conn and conn.waitForReadyRead(2000):
+            if conn.readAll().data() == b"show_menu":
+                self._show_notification()
+        if conn:
             conn.close()
-            self._show_menu()
-            return
-        if conn.waitForReadyRead(2000):
-            data = conn.readAll().data()
-            if data == b"show_menu":
-                self._show_menu()
-        conn.close()
 
-    def _show_menu(self):
+    def _show_notification(self):
         self.showMessage(
             "NVIDIA P-State Switcher",
-            "Already running — check the system tray.",
+            "Already running \u2014 check the system tray.",
             QtWidgets.QSystemTrayIcon.MessageIcon.Information,
             3000,
         )
@@ -346,7 +342,7 @@ class PStateSwitcher(QtWidgets.QSystemTrayIcon):
             self.setIcon(_render_icon(pstate))
 
     def _on_smi_fail(self, msg: str):
-        self.setToolTip(f"NVIDIA P-State\n⚠ {msg}")
+        pass  # next poll will retry
 
     def _on_setter_fail(self, msg: str):
         self.showMessage(
@@ -359,6 +355,19 @@ class PStateSwitcher(QtWidgets.QSystemTrayIcon):
 
 # ── entry point ───────────────────────────────────────────
 
+def _try_activate_existing() -> bool:
+    """Try to signal the running instance. Returns True if it exists."""
+    try:
+        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        s.settimeout(1)
+        s.connect(IPC_SOCKET)
+        s.sendall(b"show_menu")
+        s.close()
+        return True
+    except (FileNotFoundError, ConnectionRefusedError, OSError):
+        return False
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="NVIDIA P-State system tray switcher"
@@ -370,24 +379,15 @@ def main():
     args = parser.parse_args()
 
     if args.oneshot:
-        bin_ = shutil.which("nvidia-pstate")
-        if not bin_:
-            local = os.path.expanduser("~/.local/bin/nvidia-pstate")
-            if os.path.isfile(local) and os.access(local, os.X_OK):
-                bin_ = local
-        subprocess.check_call([bin_ or "nvidia-pstate", "-ps", args.oneshot])
+        subprocess.check_call([_resolve_bin("nvidia-pstate"), "-ps", args.oneshot])
+        return
+
+    if _try_activate_existing():
         return
 
     app = QtWidgets.QApplication(sys.argv)
     app.setApplicationName("nvidia-pstate-switcher")
     app.setQuitOnLastWindowClosed(False)
-
-    sock = QtNetwork.QLocalSocket()
-    sock.connectToServer("nvidia-pstate-switcher")
-    if sock.waitForConnected(1000):
-        sock.write(b"show_menu")
-        sock.waitForBytesWritten(1000)
-        return
 
     _ = PStateSwitcher()
     sys.exit(app.exec())

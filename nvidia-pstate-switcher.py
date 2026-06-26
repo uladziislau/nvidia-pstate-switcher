@@ -12,7 +12,7 @@ import shutil
 import subprocess
 import sys
 
-from PyQt6 import QtCore, QtGui, QtWidgets
+from PyQt6 import QtCore, QtGui, QtNetwork, QtWidgets
 
 DEFAULT_PSTATES = {
     "0": "Max perf",
@@ -221,6 +221,13 @@ class PStateSwitcher(QtWidgets.QSystemTrayIcon):
 
         self._refresh()
 
+        self._ipc_server = QtNetwork.QLocalServer(self)
+        self._ipc_server.setSocketOptions(
+            QtNetwork.QLocalServer.SocketOption.WorldAccessOption
+        )
+        self._ipc_server.listen("nvidia-pstate-switcher")
+        self._ipc_server.newConnection.connect(self._on_ipc_connection)
+
         self.setToolTip("NVIDIA P-State\n(right-click for menu)")
         self.activated.connect(self._on_activate)
         self.show()
@@ -281,6 +288,20 @@ class PStateSwitcher(QtWidgets.QSystemTrayIcon):
         ps_id = action.data()
         if isinstance(ps_id, str):
             self.set_state(ps_id)
+
+    def _on_ipc_connection(self):
+        conn = self._ipc_server.nextPendingConnection()
+        if conn:
+            conn.readyRead.connect(self._on_ipc_data)
+
+    def _on_ipc_data(self):
+        conn = self.sender()
+        data = conn.readAll().data()
+        if data == b"show_menu":
+            menu = self.contextMenu()
+            if menu:
+                menu.popup(QtGui.QCursor.pos())
+        conn.close()
 
     def _on_activate(self, reason):
         if reason == QtWidgets.QSystemTrayIcon.ActivationReason.DoubleClick:
@@ -349,6 +370,13 @@ def main():
     app = QtWidgets.QApplication(sys.argv)
     app.setApplicationName("nvidia-pstate-switcher")
     app.setQuitOnLastWindowClosed(False)
+
+    sock = QtNetwork.QLocalSocket()
+    sock.connectToServer("nvidia-pstate-switcher")
+    if sock.waitForConnected(1000):
+        sock.write(b"show_menu")
+        sock.waitForBytesWritten(1000)
+        return
 
     _ = PStateSwitcher()
     sys.exit(app.exec())

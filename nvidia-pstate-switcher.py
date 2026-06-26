@@ -34,7 +34,7 @@ DESKTOP_ENTRY = (
     "Name=NVIDIA P-State Switcher\n"
     "Comment=Manually set NVIDIA GPU performance state from system tray\n"
     f"Exec=/usr/local/bin/nvidia-pstate-switcher\n"
-    "Icon=computer\n"
+    "Icon=nvidia-pstate-switcher\n"
     "Categories=System;Hardware;\n"
     "Terminal=false\n"
     "StartupNotify=false\n"
@@ -161,6 +161,28 @@ class PStateSwitcher(QtWidgets.QSystemTrayIcon):
             return local
         return name
 
+    @staticmethod
+    def _ensure_desktop_entry():
+        path = os.path.expanduser(
+            "~/.local/share/applications/nvidia-pstate-switcher.desktop"
+        )
+        if os.path.isfile(path):
+            return
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        entry = (
+            "[Desktop Entry]\n"
+            "Type=Application\n"
+            "Name=NVIDIA P-State Switcher\n"
+            "Comment=Manually control NVIDIA GPU performance state from system tray\n"
+            "Exec=/usr/local/bin/nvidia-pstate-switcher\n"
+            "Icon=nvidia-pstate-switcher\n"
+            "Categories=System;Hardware;\n"
+            "Terminal=false\n"
+            "StartupNotify=false\n"
+        )
+        with open(path, "w") as f:
+            f.write(entry)
+
     def __init__(self, parent=None):
         super().__init__(parent)
 
@@ -168,6 +190,7 @@ class PStateSwitcher(QtWidgets.QSystemTrayIcon):
 
         self._nvidia_pstate_bin = self._resolve_bin("nvidia-pstate")
         self._nvidia_smi_bin = self._resolve_bin("nvidia-smi")
+        self._ensure_desktop_entry()
 
         custom = self._cfg.get("pstates")
         if custom:

@@ -151,13 +151,23 @@ class PStateSwitcher(QtWidgets.QSystemTrayIcon):
 
     _current_label = "—"
 
+    @staticmethod
+    def _resolve_bin(name: str) -> str:
+        found = shutil.which(name)
+        if found:
+            return found
+        local = os.path.expanduser(f"~/.local/bin/{name}")
+        if os.path.isfile(local) and os.access(local, os.X_OK):
+            return local
+        return name
+
     def __init__(self, parent=None):
         super().__init__(parent)
 
         self._cfg = _load_config()
 
-        self._nvidia_pstate_bin = shutil.which("nvidia-pstate") or "nvidia-pstate"
-        self._nvidia_smi_bin = shutil.which("nvidia-smi") or "nvidia-smi"
+        self._nvidia_pstate_bin = self._resolve_bin("nvidia-pstate")
+        self._nvidia_smi_bin = self._resolve_bin("nvidia-smi")
 
         custom = self._cfg.get("pstates")
         if custom:
@@ -305,8 +315,12 @@ def main():
     args = parser.parse_args()
 
     if args.oneshot:
-        nvidia_pstate_bin = shutil.which("nvidia-pstate") or "nvidia-pstate"
-        subprocess.check_call([nvidia_pstate_bin, "-ps", args.oneshot])
+        bin_ = shutil.which("nvidia-pstate")
+        if not bin_:
+            local = os.path.expanduser("~/.local/bin/nvidia-pstate")
+            if os.path.isfile(local) and os.access(local, os.X_OK):
+                bin_ = local
+        subprocess.check_call([bin_ or "nvidia-pstate", "-ps", args.oneshot])
         return
 
     app = QtWidgets.QApplication(sys.argv)

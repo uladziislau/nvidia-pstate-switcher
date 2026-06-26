@@ -225,7 +225,9 @@ class PStateSwitcher(QtWidgets.QSystemTrayIcon):
         self._ipc_server.setSocketOptions(
             QtNetwork.QLocalServer.SocketOption.WorldAccessOption
         )
-        self._ipc_server.listen("nvidia-pstate-switcher")
+        QtNetwork.QLocalServer.removeServer("nvidia-pstate-switcher")
+        if not self._ipc_server.listen("nvidia-pstate-switcher"):
+            print("IPC server failed to listen", flush=True)
         self._ipc_server.newConnection.connect(self._on_ipc_connection)
 
         self.setToolTip("NVIDIA P-State\n(right-click for menu)")
@@ -293,19 +295,24 @@ class PStateSwitcher(QtWidgets.QSystemTrayIcon):
         conn = self._ipc_server.nextPendingConnection()
         if not conn:
             return
-        conn.readyRead.connect(self._on_ipc_data)
-        if conn.bytesAvailable() > 0:
-            self._on_ipc_data(conn)
-
-    def _on_ipc_data(self, conn=None):
-        if conn is None:
-            conn = self.sender()
         data = conn.readAll().data()
         if data == b"show_menu":
-            menu = self.contextMenu()
-            if menu:
-                menu.popup(QtGui.QCursor.pos())
+            conn.close()
+            self._show_menu()
+            return
+        if conn.waitForReadyRead(2000):
+            data = conn.readAll().data()
+            if data == b"show_menu":
+                self._show_menu()
         conn.close()
+
+    def _show_menu(self):
+        self.showMessage(
+            "NVIDIA P-State Switcher",
+            "Already running — check the system tray.",
+            QtWidgets.QSystemTrayIcon.MessageIcon.Information,
+            3000,
+        )
 
     def _on_activate(self, reason):
         if reason == QtWidgets.QSystemTrayIcon.ActivationReason.DoubleClick:

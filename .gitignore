@@ -1,2 +1,6 @@
 __pycache__/
 *.pyc
+
+# Editor backups (Windscribe и подобные)
+*.bak
+*-bak
